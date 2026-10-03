@@ -1,16 +1,17 @@
-# python-dmon
+# dmon
 
 
-[![GitHub](https://img.shields.io/badge/github-python--dmon-blue?logo=github)](https://github.com/atomiechen/python-dmon)
+[![GitHub](https://img.shields.io/badge/github-dmon-blue?logo=github)](https://github.com/atomiechen/dmon)
 [![PyPI](https://img.shields.io/pypi/v/python--dmon?logo=pypi&logoColor=white)](https://pypi.org/project/python-dmon/)
-[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/atomiechen/python-dmon)
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/atomiechen/dmon)
 
 
 A lightweight, cross-platform daemon manager that runs any command — called a *task* — as a background process.
 It also supports logging and log rotation out of the box.
-**No external runtime required**.
+Requires Python 3.8+; no system daemon or container runtime is needed.
 
 Shipped as the CLI tool `dmon`.
+Created by [Atomie CHEN](https://github.com/atomiechen).
 It is a Python-based and more powerful successor to the [handy-backend shell scripts](https://github.com/atomiechen/handy-backend).
 
 
@@ -65,8 +66,15 @@ pipx run python-dmon
 To get the latest features, install from source:
 
 ```sh
-pip install git+https://github.com/atomiechen/python-dmon.git
+pip install git+https://github.com/atomiechen/dmon.git
 ```
+
+The 0.4.0 package on PyPI does not include `stack repair` or
+`ready.require_owned`; this checkout does. To use this checkout, run
+`uv tool install .` from the repository root.
+
+For coding agents, see the [setup instructions](docs/agent-setup.md) and the
+[portable skill](skills/dmon/SKILL.md). The skill is installed separately from the CLI.
 
 ## Getting Started
 
@@ -178,6 +186,25 @@ any runtime exit. Ctrl-C or SIGTERM cleans up a foreground stack in reverse
 order. `dmon stack down` requests the same cleanup for an active foreground or
 detached stack from another terminal.
 
+To replace an exited member while keeping healthy services running:
+
+```sh
+dmon stack repair dev worker --format json
+dmon stack status dev --format json
+```
+
+The live supervisor starts the replacement, waits for readiness, and records it
+as a stack member. Later `stack down dev` includes that replacement. Repair uses
+the launch configuration and environment retained by that supervisor, not edits
+made after startup. See [recovery semantics](docs/ownership.md#repair-an-exited-stack-member)
+for cancellation, unsupported supervisors, and uncertain outcomes.
+
+A stack owns the instances it launched. Starting an exited member separately
+with `dmon start worker` creates a standalone replacement: it does not repair
+the original stack, and `stack down` will not stop that replacement. See
+[partial recovery and cleanup](docs/ownership.md#recover-one-failed-member-without-restarting-healthy-services)
+when healthy services must keep running.
+
 Foreground `dmon stack up` displays new task output with task-name prefixes,
 while retaining it in each task's configured `log_path`. Detached mode does not
 attach output. `dmon stack logs` reads the latest 100 lines per task by default;
@@ -199,6 +226,13 @@ clean the tasks it started. Supervisor diagnostics are written to
 process tree; `dmon stack list` summarizes all recorded foreground and detached
 stacks. `dmon stack restart` applies to detached stacks: it performs a clean
 `down` followed by a detached `up` and preserves the stack's exit policy.
+
+A detached startup failure preserves the failing task and cause in both startup
+output and subsequent JSON status. The stack's
+`log_path` points to supervisor diagnostics; `stack logs` only shows task output
+and may be empty when no task launched. Correct the cause, then use `stack down`
+to clear the failed run before starting again. Environment-file details stay in
+the diagnostic log rather than persisted status.
 
 ### Wait for readiness
 
@@ -459,4 +493,4 @@ changes must also pass the reproducible [manual test lab](tests/manual/README.md
 
 ## License
 
-[python-dmon](https://github.com/atomiechen/python-dmon) © 2025 by [Atomie CHEN](https://github.com/atomiechen) is licensed under the [MIT License](https://github.com/atomiechen/python-dmon/blob/main/LICENSE).
+[dmon](https://github.com/atomiechen/dmon) © 2025 by [Atomie CHEN](https://github.com/atomiechen) is licensed under the [MIT License](https://github.com/atomiechen/dmon/blob/main/LICENSE).

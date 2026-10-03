@@ -32,6 +32,133 @@ class QuietHandler(BaseHTTPRequestHandler):
 
 
 class WaitTest(unittest.TestCase):
+    def test_owned_probe_rejects_foreign_listener_and_stack_rolls_back(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            server = ThreadingHTTPServer(("127.0.0.1", 0), QuietHandler)
+            thread = threading.Thread(target=server.serve_forever)
+            thread.start()
+            config = {
+                "tasks": {
+                    "api": {
+                        "cmd": [sys.executable, "-c", "import time; time.sleep(60)"],
+                        "ready": {
+                            "http": f"http://127.0.0.1:{server.server_port}/ready",
+                            "require_owned": True,
+                            "timeout": 0.3,
+                            "interval": 0.05,
+                        },
+                    }
+                },
+                "stacks": {"dev": ["api"]},
+            }
+            (root / "dmon.yaml").write_text(yaml.safe_dump(config), encoding="utf-8")
+            client = Dmon(root / "dmon.yaml")
+            try:
+                self.assertTrue(client.start("api").ok)
+                result = client.wait("api")[0]
+                self.assertFalse(result.ready)
+                self.assertEqual(result.reason, "listener-unverified")
+                inspected = self.run_dmon(root, "wait", "api", "--format", "json")
+                self.assertEqual(
+                    json.loads(inspected.stdout)["waits"][0]["reason"],
+                    "listener-unverified",
+                )
+                self.assertTrue(client.stop("api").ok)
+                started = self.run_dmon(root, "stack", "up", "-d", "dev")
+                self.assertNotEqual(started.returncode, 0)
+                self.assertFalse((root / ".dmon/api.meta.json").exists())
+                self.assertTrue(thread.is_alive())
+                # The same endpoint remains usable as an explicitly external probe.
+                direct = self.run_dmon(
+                    root,
+                    "wait",
+                    "--http",
+                    f"http://127.0.0.1:{server.server_port}/ready",
+                )
+                self.assertEqual(direct.returncode, 0, direct.stderr)
+            finally:
+                if (root / ".dmon/api.meta.json").exists():
+                    client.stop("api")
+                self.run_dmon(root, "stack", "down", "dev")
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=5)
+
+    def test_owned_probe_accepts_actual_child_listener(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            with socket.socket() as listener:
+                listener.bind(("127.0.0.1", 0))
+                port = listener.getsockname()[1]
+            child_command = [
+                sys.executable,
+                "-c",
+                # HTTPServer performs hostname lookup after bind and before
+                # listen. This TCP ownership test must not depend on DNS.
+                "import socketserver; "
+                f"socketserver.TCPServer(('127.0.0.1', {port}), "
+                "socketserver.BaseRequestHandler).serve_forever()",
+            ]
+            command = [
+                sys.executable,
+                "-c",
+                f"import subprocess; subprocess.run({child_command!r})",
+            ]
+            (root / "dmon.yaml").write_text(
+                yaml.safe_dump(
+                    {
+                        "tasks": {
+                            "api": {
+                                "cmd": command,
+                                "ready": {
+                                    "tcp": {"host": "127.0.0.1", "port": port},
+                                    "require_owned": True,
+                                    "timeout": 3,
+                                },
+                            }
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            client = Dmon(root / "dmon.yaml")
+            try:
+                self.assertTrue(client.start("api").ok)
+                result = client.wait("api")[0]
+                log = root / "logs/api.log"
+                diagnostics = [repr(result)]
+                if not result.ready:
+                    snapshot = client.status("api").snapshot
+                    diagnostics.append(repr(snapshot))
+                    try:
+                        parent = psutil.Process(snapshot.pid)
+                        for process in [parent, *parent.children(recursive=True)]:
+                            try:
+                                diagnostics.append(
+                                    repr(
+                                        (
+                                            process.pid,
+                                            process.create_time(),
+                                            process.net_connections(kind="tcp"),
+                                        )
+                                    )
+                                )
+                            except psutil.Error as error:
+                                diagnostics.append(repr(error))
+                        with socket.create_connection(("127.0.0.1", port), timeout=1):
+                            diagnostics.append("TCP endpoint is reachable")
+                    except (psutil.Error, OSError) as error:
+                        diagnostics.append(repr(error))
+                self.assertTrue(
+                    result.ready,
+                    "\n".join(diagnostics)
+                    + "; task log: "
+                    + (log.read_text(errors="replace") if log.exists() else "missing"),
+                )
+            finally:
+                client.stop("api")
+
     def run_dmon(
         self, root: Path, *args: str, timeout: float = 10
     ) -> subprocess.CompletedProcess[str]:
@@ -328,7 +455,9 @@ class WaitTest(unittest.TestCase):
                     sys.executable,
                     "-c",
                     "import os, pathlib, time; "
-                    f"pathlib.Path({str(child_pid_path)!r}).write_text(str(os.getpid())); "
+                    f"target=pathlib.Path({str(child_pid_path)!r}); "
+                    "pending=target.with_suffix('.pending'); "
+                    "pending.write_text(str(os.getpid())); pending.replace(target); "
                     "time.sleep(30)",
                 ],
                 cwd=temporary,
@@ -337,13 +466,28 @@ class WaitTest(unittest.TestCase):
                 stderr=subprocess.PIPE,
                 start_new_session=True,
             )
-            deadline = time.monotonic() + 5
-            while not child_pid_path.exists() and time.monotonic() < deadline:
-                time.sleep(0.02)
-            self.assertTrue(child_pid_path.exists(), "probe command did not start")
-            child_pid = int(child_pid_path.read_text())
-            os.kill(process.pid, signal.SIGINT)
-            stdout, stderr = process.communicate(timeout=10)
+            owner = psutil.Process(process.pid)
+            try:
+                deadline = time.monotonic() + 5
+                while not child_pid_path.exists() and time.monotonic() < deadline:
+                    time.sleep(0.02)
+                self.assertTrue(child_pid_path.exists(), "probe command did not start")
+                child_pid = int(child_pid_path.read_text())
+                os.kill(process.pid, signal.SIGINT)
+                stdout, stderr = process.communicate(timeout=10)
+            finally:
+                # A failed assertion must not leave the probe or CLI running.
+                if process.poll() is None:
+                    try:
+                        for child in owner.children(recursive=True):
+                            try:
+                                child.kill()
+                            except psutil.NoSuchProcess:
+                                pass
+                    except psutil.NoSuchProcess:
+                        pass
+                    process.kill()
+                    process.communicate(timeout=5)
 
             deadline = time.monotonic() + 5
             while psutil.pid_exists(child_pid) and time.monotonic() < deadline:

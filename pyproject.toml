@@ -1,6 +1,6 @@
 [project]
 name = "python-dmon"
-version = "0.4.0"
+version = "0.5.0"
 description = "A lightweight, cross-platform daemon manager that runs any command as a background process."
 readme = "README.md"
 authors = [
@@ -18,9 +18,9 @@ dependencies = [
 keywords = ["python-dmon", "dmon", "daemon", "background", "detach", "process management"]
 
 [project.urls]
-"Homepage" = "https://github.com/atomiechen/python-dmon"
-"Bug Tracker" = "https://github.com/atomiechen/python-dmon/issues"
-Changelog = "https://github.com/atomiechen/python-dmon/blob/main/CHANGELOG.md"
+"Homepage" = "https://github.com/atomiechen/dmon"
+"Bug Tracker" = "https://github.com/atomiechen/dmon/issues"
+Changelog = "https://github.com/atomiechen/dmon/blob/main/CHANGELOG.md"
 
 [project.scripts]
 dmon = "dmon.__main__:main"

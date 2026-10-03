@@ -220,3 +220,8 @@ dmon.yml
 !tests/manual/dmon.yaml
 .dmon/
 tests/manual/state/
+.local/
+
+# Generated terminal recordings
+*.gif
+*.mp4

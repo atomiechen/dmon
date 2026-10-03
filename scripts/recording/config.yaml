@@ -1,0 +1,5 @@
+tasks:
+  api: [python, -u, service.py, api]
+  worker: [python, -u, service.py, worker]
+stacks:
+  dev: [api, worker]

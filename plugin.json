@@ -1,0 +1,18 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "dmon",
+  "version": "0.5.0",
+  "description": "Manage local development services across coding sessions with the dmon CLI.",
+  "author": {
+    "name": "Atomie CHEN",
+    "url": "https://github.com/atomiechen"
+  },
+  "repository": "https://github.com/atomiechen/dmon",
+  "homepage": "https://github.com/atomiechen/dmon",
+  "license": "MIT",
+  "keywords": [
+    "development",
+    "processes",
+    "services"
+  ]
+}

@@ -13,6 +13,13 @@ uv run ruff format src tests --check --diff
 uv build
 ```
 
+For validation across machines, use a clean, pinned Git commit and
+`uv run --no-project --python 3.13 scripts/validate_checkout.py`. This builds and
+tests the installed wheel and collects evidence under ignored `.local/`.
+See [Windows validation](docs/windows-validation.md) for the native console
+checks. Automated CI does not replace those
+interactive checks.
+
 Use `uv sync` after intentionally changing dependencies or the project version,
 and commit the resulting `uv.lock` change. Use `uv sync --locked --dev` in clean
 validation and CI to detect an out-of-date lockfile.
@@ -46,13 +53,28 @@ output so machine-readable output can be added without breaking terminal use.
 - A successful start owns a unique metadata file. Reserve it atomically; never
   let concurrent starts silently manage the same task.
 - Metadata identifies a process by PID and creation time. A recycled PID is not
-  the same process.
+  the same process. Reject incomplete or invalid saved identity pairs before
+  inspection or control; missing evidence must not become stale-state success.
 - Process metadata must never persist configured environment values or values
   loaded from environment files.
 - Stale metadata is cleaned when safe. Corrupt metadata is reported and
   preserved for diagnosis, not silently discarded.
-- Stop the complete process tree. Try graceful termination first, then force
-  termination after the bounded grace period. Never leave descendants behind.
+- Metadata with a recorded absolute location must be read at that location
+  (resolved symlink aliases are allowed). Reject copied or moved records before
+  inspection can report them as this project's state or control can act on them.
+  New stack records persist their location; legacy stacks use the fixed location
+  derived from their recorded config path. This prevents accidental cross-project
+  control, not tampering by the same OS user. Stop services before moving a project.
+- Stop the live process tree and previously observed descendants. Try graceful
+  termination first, then force termination after the bounded grace period.
+  Stacks retain observed descendant PID/creation-time identities across parent
+  exits and supervisor crashes. Never infer permission to signal a process from
+  its name or port. On POSIX, unverified members of a former task process group
+  must produce incomplete cleanup and preserve metadata, not a success claim.
+- Process identity and observed ancestry operate within one user's trust domain;
+  they are not a security boundary. Polling cannot discover a child that forks
+  and escapes before observation. Standalone tasks have no continuous ancestry
+  observer. Keep these limits explicit; do not promise universal orphan recovery.
 - Forward a foreground terminal signal once. Do not both manually forward a
   signal and let the terminal deliver the same signal to the child group.
 - Multi-task `start` is best-effort. Stack startup is transactional and cleans
@@ -62,10 +84,19 @@ output so machine-readable output can be added without breaking terminal use.
   startup failure, readiness timeout, requested stop, or unexpected supervisor
   error must still run cleanup.
 - An active stack persists its foreground or detached mode, supervisor identity,
-  and immutable task process
-  identities it owns. `down` uses a per-run, cross-platform stop request, then
+  and the task process identities it owns. Each identity is immutable; explicit
+  repair may replace an exited member through the owning supervisor. `down` uses
+  a per-run, cross-platform stop request, then
   falls back to those identities if the supervisor has crashed; it must never
   infer ownership from task names or the current configuration.
+- Repair runs inside the live supervisor, serially with monitoring. Record the
+  replacement identity before readiness, and roll back only that replacement on
+  repair failure. Requests bind to a run and expected member identity. Never
+  adopt a standalone replacement by name. Client timeout is an unconfirmed
+  outcome, not cancellation. Preserve an unresolved spawn journal on cleanup.
+- New supervisors retain each task's resolved launch environment in memory for
+  repair; do not persist it. Config/dotenv edits apply on a new stack launch,
+  not on repair. Startup environment errors remain sanitized in saved metadata.
 - Reserve stack metadata atomically. Concurrent foreground or detached starts
   must have exactly one owner, and failed or corrupt metadata remains
   diagnosable. Normal foreground cleanup removes its ownership metadata;
@@ -145,11 +176,19 @@ output so machine-readable output can be added without breaking terminal use.
   interval are bounded and use a monotonic clock.
 - A task exiting before readiness is a failure. Probe failures are retryable
   until the overall timeout; they should not emit repeated tracebacks.
+- Optional `ready.require_owned` verifies a task/descendant listener before and
+  after a successful loopback HTTP/TCP probe. Lack of socket inspection access
+  is lack of evidence, never success; return `listener-unverified` on timeout.
+  Ordinary probes can intentionally target external dependencies and retain
+  their existing behavior. Recheck task identity and cancellation after probes.
 - Standalone waiting never starts, stops, or claims a process. Configured waits
   verify the recorded process identity; direct HTTP, TCP, and command waits do
   not require a project configuration.
 - All readiness interfaces reuse the same validation, probes, and monotonic
   deadline implementation.
+
+See [local service ownership](docs/ownership.md) for configuration examples,
+recovery steps, and the precise limits of these checks.
 
 ## Validation
 
@@ -178,6 +217,11 @@ the manual checklist.
 
 ## Change and release workflow
 
+The portable agent workflow lives in `skills/dmon/SKILL.md` and is installed
+separately from the CLI. Keep its commands and version requirements aligned with
+the documented CLI. When changing setup or recovery instructions, check the
+actual commands in an isolated project and preserve existing service managers.
+
 - Separate fixes from new features so a patch release can be validated and
   published without unreleased feature work.
 - Keep commits cohesive even when several commits will ship in one release.
@@ -186,11 +230,28 @@ the manual checklist.
   fixes. During `0.x`, still avoid unnecessary incompatibility.
 - Before release, require a clean worktree, the full local validation sequence,
   and successful CI for the exact candidate commit.
-- Follow the repository's release history: first replace `Unreleased` with the
-  local release date in a changelog commit, then update `pyproject.toml`, run
-  `uv sync`, and commit `pyproject.toml` plus `uv.lock` as
-  `Bump version to X.Y.Z`. Run local validation and CI again on that exact commit.
-- Move the main branch and create the version tag only after the final CI passes.
+- Keep `main` linear. Integrate reviewed release changes by squash or rebase,
+  without a merge commit. Synchronizing `main` requires the owner's authorization.
+- At release approval, replace `Unreleased` with the local release date and update
+  `pyproject.toml`, `plugin.json`, and `uv.lock` together. Remove any temporary
+  installation notice for the previous package. Validate the final release tree.
+- Create the version tag only after the exact final commit passes CI. The owner
+  starts the manual publish workflow, using an explicit release tag.
+
+`plugin.json` packages the canonical `skills/` directory using the
+[Agent Plugins format](https://developers.openai.com/plugins/build/plugins).
+It adds no MCP server or automatic CLI installation. Build the local distribution
+with `uv run python scripts/package_plugin.py`; the archive contains only the
+manifest, skill, and license. Plugin archives are written to
+`.local/plugin-dist/`, separate from the Python-only `dist/` directory used by
+PyPI, TestPyPI, and GitHub Release. Directory submission is a separate release action.
 
 Never weaken tests merely to make CI green. First determine whether the failure
 is a product defect, a platform-invalid test, or a formatting/lockfile mismatch.
+
+
+### Record the terminal demo
+
+See the [recording guide](scripts/recording/README.md) for local setup,
+regeneration, and editing. Uploading media or changing public README attachment
+URLs follows the owner-approved release workflow above.

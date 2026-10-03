@@ -43,6 +43,73 @@ def wait_until(predicate, timeout: float = 5.0) -> None:
 
 
 class ControlTest(unittest.TestCase):
+    def test_relative_new_paths_are_persisted_as_absolute_locations(self) -> None:
+        original_cwd = Path.cwd()
+        for rotate in (False, True):
+            with self.subTest(
+                rotate=rotate
+            ), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                config = self.make_config(
+                    root,
+                    "relative",
+                    [sys.executable, "-c", "import time; time.sleep(60)"],
+                )
+                config.meta_path = "new-state/nested/task.json"
+                config.log_path = "new-logs/task.log"
+                config.rotate_log_path = "new-logs/runner.log"
+                config.log_rotate = rotate
+                try:
+                    os.chdir(root)
+                    with redirect_stderr(StringIO()):
+                        self.assertEqual(start_single(config), 0)
+                    path = root / config.meta_path
+                    record = json.loads(path.read_text(encoding="utf-8"))
+                    self.assertEqual(record["meta_path"], str(path.resolve()))
+                    self.assertEqual(
+                        record["log_path"], str((root / config.log_path).resolve())
+                    )
+                    self.assertIsNotNone(DmonMeta.load(path))
+                    with redirect_stderr(StringIO()):
+                        self.assertEqual(stop_single(path), 0)
+                    self.assertFalse(path.exists())
+                    self.assertFalse(
+                        check_running(record["pid"], record["create_time"])
+                    )
+                finally:
+                    # Keep cleanup independent of the path regression under test.
+                    path = root / config.meta_path
+                    if path.exists():
+                        record = json.loads(path.read_text(encoding="utf-8"))
+                        if check_running(record["pid"], record["create_time"]):
+                            terminate_process_tree(psutil.Process(record["pid"]), 1)
+                    os.chdir(original_cwd)
+
+    def test_rotating_shell_command_preserves_quotes_and_metacharacters(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            script = root / "quoted command.py"
+            script.write_text(
+                "import json, sys; print(json.dumps(sys.argv[1:]), flush=True)\n",
+                encoding="utf-8",
+            )
+            config = self.make_config(root, "quoted", [])
+            config.cmd = f'"{sys.executable}" "{script}" "two words" "literal&value"'
+            config.log_rotate = True
+            config.rotate_log_path = str(root / "logs" / "runner.log")
+            try:
+                with redirect_stderr(StringIO()):
+                    self.assertEqual(start_single(config), 0)
+                meta = DmonMeta.load(config.meta_path)
+                self.assertIsNotNone(meta)
+                wait_until(lambda: not check_running(meta.pid, meta.create_time))
+                self.assertEqual(
+                    Path(config.log_path).read_text(encoding="utf-8").strip(),
+                    json.dumps(["two words", "literal&value"]),
+                )
+            finally:
+                self.cleanup_config(config)
+
     def make_config(self, root: Path, task: str, command: list[str]) -> DmonTaskConfig:
         return DmonTaskConfig(
             task=task,
@@ -95,6 +162,23 @@ class ControlTest(unittest.TestCase):
                 self.assertTrue(check_running(result.meta.pid, result.meta.create_time))
             finally:
                 self.cleanup_config(config)
+
+    def test_launch_error_without_filename_identifies_executable_not_arguments(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            config = self.make_config(
+                Path(temporary), "missing", ["missing-program", "private-argument"]
+            )
+            output = StringIO()
+            # Windows CreateProcess errors commonly omit the filename.
+            with patch(
+                "dmon.control.subprocess.Popen",
+                side_effect=FileNotFoundError(2, "The system cannot find the file"),
+            ), redirect_stderr(output):
+                result = start_single_result(config)
+            self.assertEqual(result.exit_code, 1)
+            self.assertIn("missing-program", result.error)
+            self.assertNotIn("private-argument", result.error)
+            self.assertFalse(Path(config.meta_path).exists())
 
     def test_started_task_metadata_does_not_contain_configured_environment(
         self,
@@ -187,17 +271,25 @@ class ControlTest(unittest.TestCase):
             config.env_files = [str(env_file)]
             config.env = {"DMON_OUTPUT": str(output)}
 
-            with redirect_stderr(StringIO()):
-                self.assertEqual(start_single(config), 0)
-            wait_until(output.exists)
+            try:
+                with redirect_stderr(StringIO()):
+                    self.assertEqual(start_single(config), 0)
+                wait_until(output.exists)
 
-            self.assertEqual(output.read_text(encoding="utf-8"), "from-file")
-            metadata = Path(config.meta_path).read_text(encoding="utf-8")
-            stored = json.loads(metadata)
-            self.assertNotIn("env", stored)
-            self.assertNotIn("env_files", stored)
-            self.assertNotIn("from-file", metadata)
-            self.assertNotIn(str(env_file), metadata)
+                self.assertEqual(output.read_text(encoding="utf-8"), "from-file")
+                metadata = Path(config.meta_path).read_text(encoding="utf-8")
+                stored = json.loads(metadata)
+                self.assertNotIn("env", stored)
+                self.assertNotIn("env_files", stored)
+                self.assertNotIn("from-file", metadata)
+                self.assertNotIn(str(env_file), metadata)
+                # File creation precedes interpreter shutdown. Wait for the
+                # child to release its log handle before removing the directory.
+                wait_until(
+                    lambda: not check_running(stored["pid"], stored["create_time"])
+                )
+            finally:
+                self.cleanup_config(config)
 
     def test_missing_environment_file_fails_before_reserving_metadata(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
