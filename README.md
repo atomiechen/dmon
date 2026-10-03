@@ -29,7 +29,33 @@ It is a Python-based and more powerful successor to the [handy-backend shell scr
   command probes from scripts and deployment workflows.
 - 🪵 **Logging & log rotation:** Keep active log files manageable, with optional archive retention limits.
 
-![dmon-demo-gif](https://github.com/user-attachments/assets/9bae2f46-5ef4-4784-aced-18d573204efc)
+
+## Demos
+
+The demos below cover everyday task management and supervised stacks. Both use this `dmon.yaml` and a small [heartbeat program](https://github.com/atomiechen/dmon/blob/main/scripts/recording/service.py):
+
+```yaml
+tasks:
+  api: [python, -u, service.py, api]
+  worker: [python, -u, service.py, worker]
+stacks:
+  dev: [api, worker]
+```
+
+**Everyday tasks.** Run a command directly with `run` (no configuration needed),
+then use `start`, `status`, and `stop` for a configured task. `exec` runs a
+configured task in the foreground; Ctrl-C ends it. In this clip, `stop --all`
+stops the sole ad-hoc task before the configured API is started.
+
+![Run an ad-hoc command, manage a configured task, and execute a task in the foreground](https://github.com/user-attachments/assets/2b60acab-d56d-43c0-a44b-f602243c7105)
+
+
+**Keep healthy services running.** Start a stack, deliberately stop its worker,
+and repair that member. The API keeps the same PID and its counter continues;
+`stack down` stops both members. The lower panes show real files and live logs.
+
+![Start a stack, repair only its stopped worker, and clean up both members](https://github.com/user-attachments/assets/58d1a9f9-91d8-4096-9dca-ac53815194c8)
+
 
 
 ## Installation
