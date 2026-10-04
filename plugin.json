@@ -2,7 +2,7 @@
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "dmon",
   "version": "0.5.0",
-  "description": "Manage local development services across coding sessions with the dmon CLI.",
+  "description": "Manage background tasks and local service stacks for developers and coding agents, with inspectable process state across sessions.",
   "author": {
     "name": "Atomie CHEN",
     "url": "https://github.com/atomiechen"
@@ -13,6 +13,32 @@
   "keywords": [
     "development",
     "processes",
-    "services"
-  ]
+    "services",
+    "coding-agents"
+  ],
+  "extensions": {
+    "com.openai": {
+      "interface": {
+        "displayName": "dmon",
+        "shortDescription": "Keep local services manageable",
+        "longDescription": "Keep development services running across terminals and coding-agent sessions. dmon records process identities and exposes JSON status so an agent can inspect and reuse existing services before starting new ones. Start background tasks or service stacks with readiness checks, read logs, and repair failed stack members while healthy services keep running.\n\nThis skill requires local command access and the dmon CLI, installed separately. Keep existing container and production service managers; one-off commands usually need no process manager.",
+        "developerName": "Atomie CHEN",
+        "category": "Developer Tools",
+        "capabilities": [
+          "Inspect and reuse local services",
+          "Run background tasks and service stacks",
+          "Repair failed stack members"
+        ],
+        "websiteURL": "https://github.com/atomiechen/dmon",
+        "defaultPrompt": [
+          "Check whether this project's local services are already running before starting new ones.",
+          "Keep my API and frontend running while I work on this repository.",
+          "Repair failed services in this stack without restarting healthy ones."
+        ],
+        "logo": "./assets/logo.svg",
+        "composerIcon": "./assets/icon.svg"
+      },
+      "onboardingSkill": "./skills/dmon/SKILL.md"
+    }
+  }
 }

@@ -1,14 +1,22 @@
 # dmon
 
+![dmon — The local process manager for developers and coding agents.](https://raw.githubusercontent.com/atomiechen/dmon/main/assets/banner.svg)
+
 
 [![GitHub](https://img.shields.io/badge/github-dmon-blue?logo=github)](https://github.com/atomiechen/dmon)
 [![PyPI](https://img.shields.io/pypi/v/python--dmon?logo=pypi&logoColor=white)](https://pypi.org/project/python-dmon/)
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/atomiechen/dmon)
 
 
-A lightweight, cross-platform daemon manager that runs any command — called a *task* — as a background process.
-It also supports logging and log rotation out of the box.
+A lightweight, cross-platform process manager for local services and development workflows.
+Run any command as a background *task*, or supervise a stack with readiness checks
+and repair failed members while healthy services keep running. Logging and log
+rotation are built in.
 Requires Python 3.8+; no system daemon or container runtime is needed.
+
+For developers and coding agents, dmon records process identities and exposes
+JSON status so later sessions can inspect and reuse existing services.
+See [coding-agent setup](https://github.com/atomiechen/dmon/blob/main/docs/agent-setup.md).
 
 Shipped as the CLI tool `dmon`.
 Created by [Atomie CHEN](https://github.com/atomiechen).
@@ -95,12 +103,8 @@ To get the latest features, install from source:
 pip install git+https://github.com/atomiechen/dmon.git
 ```
 
-The 0.4.0 package on PyPI does not include `stack repair` or
-`ready.require_owned`; this checkout does. To use this checkout, run
-`uv tool install .` from the repository root.
-
-For coding agents, see the [setup instructions](docs/agent-setup.md) and the
-[portable skill](skills/dmon/SKILL.md). The skill is installed separately from the CLI.
+For coding agents, see the [setup instructions](https://github.com/atomiechen/dmon/blob/main/docs/agent-setup.md) and the
+[portable skill](https://github.com/atomiechen/dmon/blob/main/skills/dmon/SKILL.md). The skill is installed separately from the CLI.
 
 ## Getting Started
 
@@ -222,13 +226,13 @@ dmon stack status dev --format json
 The live supervisor starts the replacement, waits for readiness, and records it
 as a stack member. Later `stack down dev` includes that replacement. Repair uses
 the launch configuration and environment retained by that supervisor, not edits
-made after startup. See [recovery semantics](docs/ownership.md#repair-an-exited-stack-member)
+made after startup. See [recovery semantics](https://github.com/atomiechen/dmon/blob/main/docs/ownership.md#repair-an-exited-stack-member)
 for cancellation, unsupported supervisors, and uncertain outcomes.
 
 A stack owns the instances it launched. Starting an exited member separately
 with `dmon start worker` creates a standalone replacement: it does not repair
 the original stack, and `stack down` will not stop that replacement. See
-[partial recovery and cleanup](docs/ownership.md#recover-one-failed-member-without-restarting-healthy-services)
+[partial recovery and cleanup](https://github.com/atomiechen/dmon/blob/main/docs/ownership.md#recover-one-failed-member-without-restarting-healthy-services)
 when healthy services must keep running.
 
 Foreground `dmon stack up` displays new task output with task-name prefixes,
@@ -512,9 +516,9 @@ the complete process tree and also cleans stale metadata left by an exited task.
 
 ## Development
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for architecture, behavioral contracts,
+See [CONTRIBUTING.md](https://github.com/atomiechen/dmon/blob/main/CONTRIBUTING.md) for architecture, behavioral contracts,
 validation, and the release workflow. Process, signal, log-rotation, and stack
-changes must also pass the reproducible [manual test lab](tests/manual/README.md).
+changes must also pass the reproducible [manual test lab](https://github.com/atomiechen/dmon/blob/main/tests/manual/README.md).
 
 
 ## License

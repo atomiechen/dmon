@@ -3,17 +3,24 @@
 The CLI runs services. The [skill](../skills/dmon/SKILL.md) teaches an agent
 when to use it and how to inspect, repair, and stop existing services.
 
+Use dmon for local services that should keep running across terminals or agent
+sessions and remain available for inspection, reuse, and cleanup. One-off commands
+usually need no process manager; keep services already managed by Docker Compose
+or a production service manager under that manager.
+
 ## Install the CLI
 
-From the dmon source checkout:
+Install the CLI in an isolated tool environment:
 
 ```sh
-uv tool install .
+uv tool install "python-dmon>=0.5.0"
 dmon stack repair --help
 ```
 
-Use this checkout for the commands in this example. Python 3.8+ and uv are required.
-For an existing project installation, keep its chosen version and environment.
+Python 3.8+ and uv are required for these commands. Alternatively, use
+`pipx install "python-dmon>=0.5.0"`. For a source checkout, run
+`uv tool install .` from its root. Keep an existing project's chosen version and
+environment; repair and listener ownership checks require 0.5.0 or later.
 
 ## Give the workflow to your agent
 

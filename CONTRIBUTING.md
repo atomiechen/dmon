@@ -230,21 +230,61 @@ actual commands in an isolated project and preserve existing service managers.
   fixes. During `0.x`, still avoid unnecessary incompatibility.
 - Before release, require a clean worktree, the full local validation sequence,
   and successful CI for the exact candidate commit.
-- Keep `main` linear. Integrate reviewed release changes by squash or rebase,
-  without a merge commit. Synchronizing `main` requires the owner's authorization.
-- At release approval, replace `Unreleased` with the local release date and update
-  `pyproject.toml`, `plugin.json`, and `uv.lock` together. Remove any temporary
+- Keep `main` linear and commits focused. Squash intermediate work; fast-forward
+  is appropriate when the reviewed commits are worth retaining individually.
+  Record durable maintenance knowledge in documentation. Synchronizing `main`
+  requires the owner's authorization.
+- Before the final candidate review, replace `Unreleased` with the intended release
+  date and update `pyproject.toml`, `plugin.json`, and `uv.lock` together. Remove any temporary
   installation notice for the previous package. Validate the final release tree.
 - Create the version tag only after the exact final commit passes CI. The owner
-  starts the manual publish workflow, using an explicit release tag.
+  starts the manual publish workflow. Prefer an explicit release tag; leaving it
+  empty selects the latest tag. TestPyPI and PyPI default off; GitHub Release
+  defaults on. Disabling every target is an error.
+- The pinned reusable workflow builds and runs ordinary `twine check` before
+  uploading Python distributions. It also creates GitHub Releases when selected.
+  dmon's top-level `publish.yml` jobs use Trusted Publishing for PyPI and TestPyPI;
+  neither passes an API token or falls back to one after an upload failure.
+  Configure each index's publisher for `atomiechen/dmon` and `publish.yml`,
+  without an environment restriction (the jobs do not select an environment).
+  Other repositories using the reusable workflow's token path remain independent.
 
 `plugin.json` packages the canonical `skills/` directory using the
 [Agent Plugins format](https://developers.openai.com/plugins/build/plugins).
 It adds no MCP server or automatic CLI installation. Build the local distribution
-with `uv run python scripts/package_plugin.py`; the archive contains only the
-manifest, skill, and license. Plugin archives are written to
+with `uv run python scripts/package_plugin.py`. It produces `dmon-openai-plugin-VERSION.zip`
+for OpenAI and `dmon-claude-plugin-VERSION.zip` with a generated
+`.claude-plugin/plugin.json` for Claude Code, both from the same skill and metadata.
+Keep shared product metadata in root `plugin.json` and the workflow in
+`skills/dmon/`; the script only maps manifest fields and packages files.
+OpenAI listing text and starter prompts live under `extensions.com.openai.interface`;
+`onboardingSkill` references the existing packaged `skills/dmon/SKILL.md`.
+Do not duplicate product descriptions or prompts in the Python adapter.
+Each archive contains only its manifest, skill, license, and explicitly referenced
+platform assets. The script checks version agreement, required files, listing
+length limits, contained asset/onboarding paths, and archive contents, then prints
+file lists and checksums. Run packaging regression checks with
+`uv run python -m unittest discover -s tests -p test_package_plugin.py`.
+Identical inputs produce identical archives. Plugin archives are written to
 `.local/plugin-dist/`, separate from the Python-only `dist/` directory used by
 PyPI, TestPyPI, and GitHub Release. Directory submission is a separate release action.
+
+Brand SVGs live in `assets/`: `banner.svg` is the README header, `logo.svg` is
+OpenAI's square listing image, and `icon.svg` is the compact mark shared by
+OpenAI's composer and Claude's native `icon` field. The Claude adapter derives
+that field from `composerIcon` and includes only the referenced compact icon.
+The banner stays out of both plugin archives. Keep the white backing so one set
+remains legible on light and dark surfaces; glyphs are paths with no font dependency.
+Check rendering at small sizes when editing assets. The packager checks SVG icon
+geometry (square, at least 48×48) as well as referenced paths and file sizes.
+
+After the CLI release, upload the OpenAI archive through the
+[plugin submission portal](https://developers.openai.com/plugins/deploy/submission),
+resolve its checks, and submit for review. The owner controls submission and publication.
+For Claude Code, extract its archive and run `claude plugin validate PATH` before
+using it as a [marketplace plugin source](https://code.claude.com/docs/en/plugin-marketplaces).
+The archive alone does not create a marketplace listing. Platform validation and
+approval are separate from the local packaging checks.
 
 Never weaken tests merely to make CI green. First determine whether the failure
 is a product defect, a platform-invalid test, or a formatting/lockfile mismatch.

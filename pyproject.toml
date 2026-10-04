@@ -1,8 +1,10 @@
 [project]
 name = "python-dmon"
 version = "0.5.0"
-description = "A lightweight, cross-platform daemon manager that runs any command as a background process."
+description = "A lightweight, cross-platform process manager for background tasks, local service stacks, and partial recovery."
 readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
 authors = [
     { name = "Atomie CHEN", email = "atomic_cwh@163.com" }
 ]
@@ -15,7 +17,7 @@ dependencies = [
     "termcolor>=2.4.0",
     "tomli>=2.2.1 ; python_full_version < '3.11'",
 ]
-keywords = ["python-dmon", "dmon", "daemon", "background", "detach", "process management"]
+keywords = ["dmon", "process manager", "daemon", "background", "supervisor", "local development", "readiness", "service management", "coding agents"]
 
 [project.urls]
 "Homepage" = "https://github.com/atomiechen/dmon"

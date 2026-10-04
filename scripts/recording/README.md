@@ -25,3 +25,9 @@ Review both GIFs for readable colors and unclipped content. The recorder checks
 CLI errors, ANSI output, stack API identity preservation, worker replacement,
 and tracked-process cleanup. Recording tools are maintainer-only dependencies;
 recording does not run in CI.
+
+
+Public demos use GitHub user attachments. After owner approval, upload the final
+GIFs in the GitHub Markdown editor on the candidate branch and commit the
+generated URLs in README. Before merging, verify both URLs while signed out
+and check that the animations play. Do not rely on uploads from a cancelled edit.

@@ -29,48 +29,68 @@ on:
         description: Tag to package (empty for latest tag)
         required: false
 
+permissions:
+  contents: read
+
 jobs:
   get-tag:
     runs-on: ubuntu-latest
     outputs:
       release_tag: ${{ steps.set_release_tag.outputs.tag }}
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-    - name: Fetch all tags
-      run: |
-        git fetch --prune --unshallow --tags
-    - name: Verify and set release tag
-      id: set_release_tag
-      run: |
-        release_tag=${{ inputs.release_tag }}
-        if [ -z "$release_tag" ]; then
-          echo "Input tag is empty. Fetching latest tag."
-          release_tag=$(git describe --tags $(git rev-list --tags --max-count=1))
-          if [ -z "$release_tag" ]; then
-            echo "No latest tag available. Exiting workflow."
-            exit 1
-          fi
-        else
-          if ! git rev-parse -q --verify "refs/tags/$release_tag" >/dev/null; then
-            echo "Invalid tag '$release_tag'. Exiting workflow."
-            exit 1
-          fi
-        fi
-        echo "tag=$release_tag" >> $GITHUB_OUTPUT
+      - name: Check selected targets
+        if: ${{ !inputs.publish_testpypi && !inputs.publish_pypi && !inputs.publish_gh_release }}
+        run: |
+          echo "All publish targets are disabled."
+          exit 1
+      - name: Verify and set release tag
+        id: set_release_tag
+        uses: atomiechen/reusable-workflows/.github/actions/verify-tag@dc0e552d0473b25ff8eccf3f32a97e26d17d5185 # verified tag resolver
+        with:
+          tag: ${{ inputs.release_tag }}
+
   build-n-publish:
     needs: get-tag
     permissions:
-      id-token: write  # IMPORTANT: mandatory for trusted publishing and sigstore
-      contents: write  # IMPORTANT: mandatory for making GitHub Releases
-    uses: atomiechen/reusable-workflows/.github/workflows/publish-python-distributions.yml@main
+      contents: write # GitHub Release
+      id-token: write # Sigstore for GitHub Release
+    uses: atomiechen/reusable-workflows/.github/workflows/publish-python-distributions.yml@cbac983c5ec0c0a2b133a960d10a156a3d1bf069 # build validation and token-compatible publisher
     with:
-      publish_testpypi: ${{ inputs.publish_testpypi }}
-      publish_pypi: ${{ inputs.publish_pypi }}
+      # PyPI uploads happen below, outside the reusable workflow.
+      build_only: ${{ !inputs.publish_gh_release }}
+      publish_testpypi: false
+      publish_pypi: false
       publish_gh_release: ${{ inputs.publish_gh_release }}
       use_changelog: ${{ inputs.use_changelog }}
       changelog_file: ${{ inputs.changelog_file }}
       release_tag: ${{ needs.get-tag.outputs.release_tag }}
-    secrets:
-      TEST_PYPI_API_TOKEN: ${{ secrets.TEST_PYPI_API_TOKEN }}
-      PYPI_API_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
+
+  publish-to-testpypi:
+    if: ${{ inputs.publish_testpypi }}
+    needs: build-n-publish
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: python-package-distributions
+          path: dist/
+      - name: Publish to TestPyPI with Trusted Publishing
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+
+  publish-to-pypi:
+    if: ${{ inputs.publish_pypi }}
+    needs: build-n-publish
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: python-package-distributions
+          path: dist/
+      - name: Publish to PyPI with Trusted Publishing
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # release/v1
