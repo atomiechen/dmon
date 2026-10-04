@@ -238,8 +238,10 @@ client.stop("app")
 ```
 
 `client.wait("app", timeout=30)` also checks readiness when `app` has a
-configured `ready` probe. API calls are synchronous and silent. They return immutable `ActionResult`,
-`TaskResult`, `StackResult`, and `WaitResult` data; expected runtime states such
+configured `ready` probe. API calls are synchronous and silent.
+`start`, `stop`, and `restart` return an immutable `BatchResult`; `status`
+and `stack_status` return `TaskResult` and `StackResult`. List and wait methods
+return tuples of their corresponding result types. Expected runtime states such
 as missing or exited metadata are results, while invalid configuration raises
 `DmonConfigError`. The initial API intentionally does not start a supervised
 stack or create implicit background threads.

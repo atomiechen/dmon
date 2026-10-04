@@ -40,10 +40,19 @@ class DmonConfigError(DmonError):
 
 
 class Dmon:
+    """Silent, structured Python interface to dmon task operations.
+
+    Args:
+        config: Optional dmon YAML/TOML file or directory. When omitted, dmon
+            uses the same configuration discovery rules as the CLI.
+    """
+
     def __init__(self, config: Optional[Union[str, os.PathLike]] = None) -> None:
         self.config = str(config) if config is not None else None
 
     def start(self, *tasks: str) -> BatchResult:
+        """Start one or more configured tasks in the background."""
+
         names, configs, _ = self._tasks(tasks)
         self._validate_environments(configs)
         results = []
@@ -66,6 +75,8 @@ class Dmon:
         return BatchResult("start", tuple(results))
 
     def stop(self, *tasks: str) -> BatchResult:
+        """Stop one or more configured tasks using their recorded identities."""
+
         names, configs, _ = self._tasks(tasks)
         results = []
         with self._operation():
@@ -83,6 +94,8 @@ class Dmon:
         return BatchResult("stop", tuple(results))
 
     def restart(self, *tasks: str) -> BatchResult:
+        """Restart one or more configured tasks."""
+
         names, configs, _ = self._tasks(tasks)
         self._validate_environments(configs)
         results = []
@@ -104,6 +117,8 @@ class Dmon:
         return BatchResult("restart", tuple(results))
 
     def status(self, task: Optional[str] = None) -> TaskResult:
+        """Inspect one configured task without changing its lifecycle."""
+
         names, configs, _ = self._tasks(() if task is None else (task,))
         if len(names) != 1:
             raise DmonConfigError("status requires exactly one task")
@@ -111,6 +126,8 @@ class Dmon:
             return self._task_result(names[0], Path(configs[0].meta_path))
 
     def list_tasks(self) -> Tuple[TaskResult, ...]:
+        """Return recorded task results for the selected project."""
+
         project = self._project()
         results = []
         with self._operation():
@@ -127,6 +144,8 @@ class Dmon:
         return tuple(results)
 
     def stack_status(self, stack: str) -> StackResult:
+        """Inspect one recorded stack without changing its lifecycle."""
+
         if not isinstance(stack, str) or not stack:
             raise DmonConfigError("stack name must not be empty")
         project = self._project()
@@ -139,6 +158,8 @@ class Dmon:
             )
 
     def list_stacks(self) -> Tuple[StackResult, ...]:
+        """Return recorded stack results for the selected project."""
+
         project = self._project()
         results = []
         with self._operation():
@@ -155,6 +176,8 @@ class Dmon:
         timeout: Optional[float] = None,
         interval: Optional[float] = None,
     ) -> Tuple[WaitResult, ...]:
+        """Wait for configured readiness without starting or stopping tasks."""
+
         for name, value in (("timeout", timeout), ("interval", interval)):
             if value is not None and (
                 not isinstance(value, (int, float))

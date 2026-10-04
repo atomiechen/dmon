@@ -9,6 +9,8 @@ CommandSnapshot = Union[str, Tuple[str, ...]]
 
 @dataclass(frozen=True)
 class TaskSnapshot:
+    """Immutable snapshot of one recorded task process."""
+
     task: str
     pid: int
     status: str
@@ -28,11 +30,14 @@ class TaskSnapshot:
 
     @property
     def running(self) -> bool:
+        """Whether the snapshot reports the task as running."""
         return self.status == "running"
 
 
 @dataclass(frozen=True)
 class StackSnapshot:
+    """Immutable snapshot of one recorded supervised stack."""
+
     stack: str
     status: str
     mode: str
@@ -49,37 +54,47 @@ class StackSnapshot:
 
     @property
     def exit_policy(self) -> str:
+        """Return the stack's configured runtime exit policy."""
         return "abort-on-exit" if self.abort_on_exit else "keep-running"
 
     @property
     def running(self) -> bool:
+        """Whether the snapshot reports the stack as running."""
         return self.status == "running"
 
 
 @dataclass(frozen=True)
 class TaskResult:
+    """Result of inspecting one task, with a snapshot on success."""
+
     name: str
     snapshot: Optional[TaskSnapshot] = None
     error: str = ""
 
     @property
     def ok(self) -> bool:
+        """Whether inspection produced a valid snapshot without an error."""
         return self.snapshot is not None and not self.error
 
 
 @dataclass(frozen=True)
 class StackResult:
+    """Result of inspecting one stack, with a snapshot on success."""
+
     name: str
     snapshot: Optional[StackSnapshot] = None
     error: str = ""
 
     @property
     def ok(self) -> bool:
+        """Whether inspection produced a valid snapshot without an error."""
         return self.snapshot is not None and not self.error
 
 
 @dataclass(frozen=True)
 class ActionResult:
+    """Result of one task lifecycle action within a batch."""
+
     action: str
     name: str
     ok: bool
@@ -90,20 +105,26 @@ class ActionResult:
 
 @dataclass(frozen=True)
 class BatchResult:
+    """Aggregate result for a multi-task lifecycle action."""
+
     action: str
     results: Tuple[ActionResult, ...]
 
     @property
     def ok(self) -> bool:
+        """Whether every action in the batch succeeded."""
         return all(result.ok for result in self.results)
 
     @property
     def exit_code(self) -> int:
+        """Return zero for a fully successful batch, otherwise one."""
         return 0 if self.ok else 1
 
 
 @dataclass(frozen=True)
 class WaitResult:
+    """Finite readiness result for one configured task."""
+
     target: str
     ready: bool
     reason: str
