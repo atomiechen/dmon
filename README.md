@@ -12,15 +12,12 @@ A lightweight, cross-platform process manager for local services and development
 Run any command as a background *task*, or supervise a stack with readiness checks
 and repair failed members while healthy services keep running. Logging and log
 rotation are built in.
-Requires Python 3.8+; no system daemon or container runtime is needed.
 
 For developers and coding agents, dmon records process identities and exposes
 JSON status so later sessions can inspect and reuse existing services.
 See [coding-agent setup](https://github.com/atomiechen/dmon/blob/main/docs/agent-setup.md).
 
 Shipped as the CLI tool `dmon`.
-Created by [Atomie CHEN](https://github.com/atomiechen).
-It is a Python-based and more powerful successor to the [handy-backend shell scripts](https://github.com/atomiechen/handy-backend).
 
 
 ## Features
@@ -68,7 +65,8 @@ and repair that member. The API keeps the same PID and its counter continues;
 
 ## Installation
 
-`python-dmon` is available on [PyPI](https://pypi.org/project/python-dmon/):
+`dmon` requires Python 3.8+ and is available as [`python-dmon`](https://pypi.org/project/python-dmon/) on PyPI.
+Managed commands can use any language.
 
 ```sh
 pip install python-dmon
@@ -87,7 +85,7 @@ pipx install python-dmon
 uv add --dev python-dmon
 ```
 
-You can also invoke without installing:
+You can also run dmon without installing it permanently:
 
 ```sh
 # With uvx (uv tool run)
@@ -114,260 +112,102 @@ Create a `dmon.yaml` file:
 
 ```yaml
 tasks:
-  app: ["python", "-u", "server.py"]  # option 1: exec form
-  # app: "python -u server.py"  # option 2: shell string
+  app: ["python", "-u", "server.py"]  # exec form
+  # app: "python -u server.py"        # or a shell string
 ```
 
-Or add to your `pyproject.toml`:
-
-```toml
-[tool.dmon.tasks]
-app = ["python", "-u", "server.py"]  # option 1: exec form
-# app = "python -u server.py"  # option 2: shell string
-```
-
-Commands can be a single string (run in shell), or list of strings (exec form).
-See [Example Configuration](#example-configuration) for more configuration options.
 Without `--config`, dmon searches the current directory and its parents for
-`dmon.yaml`, `dmon.yml`, or `pyproject.toml`.
-
+`dmon.yaml`, `dmon.yml`, or `pyproject.toml`. See the
+[configuration reference](https://github.com/atomiechen/dmon/blob/main/docs/configuration.md)
+for TOML, environments, paths, defaults, and log rotation.
 
 ### Run tasks
 
-Run a configured task by its name:
-
 ```sh
-# Start a task
-dmon start app
-
-# Stop a running task
-dmon stop app
-
-# Restart a task
+dmon start app      # Start in the background
+dmon stop app      # Stop the recorded process tree
 dmon restart app
-
-# Check task status
 dmon status app
-
-# Execute a task in the foreground (useful for debugging)
-dmon exec app
+dmon exec app      # Run in this terminal; Ctrl-C ends it
 ```
 
-`dmon exec` runs one configured command directly in the current terminal for
-debugging; it is not registered as a managed background task. Use `dmon start`
-when the task should remain discoverable through `dmon status` and `dmon list`.
+`exec` runs one configured command directly, without registering a managed
+background task. Use `start` to keep it discoverable through `status` and `list`.
+You can pass multiple names to the other task commands. Multi-task `start` is
+best-effort: successful tasks stay running if another fails. For related
+services with ordered startup and rollback, use a stack.
 
-You can specify multiple tasks at once, e.g.: `dmon start app1 app2 app3`, except for `dmon exec` which only accepts one task.
-
-Multi-task `start` is best-effort: dmon attempts every requested task and leaves
-successful tasks running if another task cannot start. The command returns a
-non-zero status and prints a summary naming the failed tasks. This is useful for
-independent background services and does not provide atomic stack semantics.
-
-For related services that should start and stop as one unit, define a stack and
-run it in the foreground. Unlike a direct `dmon exec`, a foreground stack is a
-managed multi-task lifecycle and remains discoverable from another terminal:
+### Run a stack
 
 ```yaml
 tasks:
-  database:
-    cmd: [python, database.py]
-    ready:
-      tcp: {host: 127.0.0.1, port: 5432}
-      timeout: 20
   api:
     cmd: [python, api.py]
-    depends_on: [database]
     ready:
       http: http://127.0.0.1:8000/health
   worker:
     cmd: [python, worker.py]
     depends_on: [api]
-
 stacks:
   dev: [api, worker]
-default_stack: dev
 ```
 
 ```sh
-dmon stack up dev
-# Or omit the name when default_stack (or only one stack) is configured
-dmon stack up
-
-# Keep the supervised stack running in the background
+dmon stack up dev          # Foreground; Ctrl-C stops the stack
+# Or keep it running under a background supervisor:
 dmon stack up -d dev
 dmon stack status dev
-dmon stack restart dev
 dmon stack logs --tail 100 dev
-dmon stack logs -f dev
-dmon stack list
+dmon stack repair dev worker --format json  # Replace an exited member
 dmon stack down dev
-
-# Optional fail-fast policy for foreground or detached stacks
-dmon stack up --abort-on-exit dev
 ```
 
-`dmon stack up` starts dependencies in order and waits for each task's optional
-readiness probe. A startup failure or readiness timeout rolls back every task
-started by that invocation. After startup, an exited task marks the stack as
-degraded while unrelated tasks continue running, matching Docker Compose's
-default behavior. Use `--abort-on-exit` when the whole stack should stop after
-any runtime exit. Ctrl-C or SIGTERM cleans up a foreground stack in reverse
-order. `dmon stack down` requests the same cleanup for an active foreground or
-detached stack from another terminal.
+Stack startup waits for readiness and rolls back tasks it started if startup
+fails. After startup, an exited member degrades the stack while healthy peers
+keep running. `repair` replaces that member through its live supervisor, so
+later `down` includes the replacement. It reuses the supervisor's launch
+configuration and environment; separately running `dmon start worker` does not
+repair stack membership.
 
-To replace an exited member while keeping healthy services running:
-
-```sh
-dmon stack repair dev worker --format json
-dmon stack status dev --format json
-```
-
-The live supervisor starts the replacement, waits for readiness, and records it
-as a stack member. Later `stack down dev` includes that replacement. Repair uses
-the launch configuration and environment retained by that supervisor, not edits
-made after startup. See [recovery semantics](https://github.com/atomiechen/dmon/blob/main/docs/ownership.md#repair-an-exited-stack-member)
-for cancellation, unsupported supervisors, and uncertain outcomes.
-
-A stack owns the instances it launched. Starting an exited member separately
-with `dmon start worker` creates a standalone replacement: it does not repair
-the original stack, and `stack down` will not stop that replacement. See
-[partial recovery and cleanup](https://github.com/atomiechen/dmon/blob/main/docs/ownership.md#recover-one-failed-member-without-restarting-healthy-services)
-when healthy services must keep running.
-
-Foreground `dmon stack up` displays new task output with task-name prefixes,
-while retaining it in each task's configured `log_path`. Detached mode does not
-attach output. `dmon stack logs` reads the latest 100 lines per task by default;
-`--tail` changes that count and `-f` follows new output. Log viewing never
-modifies the underlying files and never controls running processes. Docker
+See [task and stack lifecycle](https://github.com/atomiechen/dmon/blob/main/docs/ownership.md)
+for fail-fast behavior, detached restart, recovery, and ownership limits. Docker
 Compose is still appropriate when container behavior itself must be tested.
-
-Terminal attachment and process management are separate choices: `dmon exec`
-is foreground but intentionally unmanaged, while foreground `dmon stack up` is
-supervised, recorded, and discoverable from another terminal. Detached stacks
-use the same ownership model without attaching their output.
-
-Detached mode waits for the same startup and readiness checks before returning.
-A lightweight background supervisor keeps monitoring the stack; `dmon stack down`
-requests the same graceful reverse-order cleanup on every platform. If that
-supervisor is killed, its persisted ownership metadata lets `down` recover and
-clean the tasks it started. Supervisor diagnostics are written to
-`logs/<stack>.stack.log`. `dmon stack status` includes every owned task and its
-process tree; `dmon stack list` summarizes all recorded foreground and detached
-stacks. `dmon stack restart` applies to detached stacks: it performs a clean
-`down` followed by a detached `up` and preserves the stack's exit policy.
-
-A detached startup failure preserves the failing task and cause in both startup
-output and subsequent JSON status. The stack's
-`log_path` points to supervisor diagnostics; `stack logs` only shows task output
-and may be empty when no task launched. Correct the cause, then use `stack down`
-to clear the failed run before starting again. Environment-file details stay in
-the diagnostic log rather than persisted status.
 
 ### Wait for readiness
 
-`dmon wait` checks readiness without starting or stopping anything. For a
-configured task, the task must already be managed by `dmon start` or a stack;
-the command uses that task's configured probe, working directory, environment,
-and process identity. The task name can be omitted when `default_task` is set or
-the configuration contains only one task:
+`dmon wait` checks readiness without starting or stopping anything. Configured
+tasks need a `ready` probe and must already be managed by `start` or a stack:
 
 ```sh
 dmon wait api
-dmon wait api worker --timeout 60 --interval 0.5
-```
+dmon wait api --timeout 60 --interval 0.5
 
-Direct probes need no dmon configuration:
-
-```sh
+# Direct probes need no configuration
 dmon wait --http http://127.0.0.1:8000/health
 dmon wait --tcp 127.0.0.1:5432
 dmon wait --timeout 30 --command -- python healthcheck.py --verbose
 ```
 
-For command probes, dmon options must precede `--command`; the optional second
-`--` marks the child-command boundary. The command returns zero only when every
-target is ready, one for a completed unsuccessful wait, and 130 when interrupted.
-Configured timeouts and intervals can be overridden with positive values.
-
-Or use `--all` to operate on all tasks:
-
-```sh
-# All configured tasks
-dmon start --all
-dmon restart --all
-
-# All recorded task metadata in the project
-dmon status --all
-dmon stop --all
-```
-
-If you have defined `default_task`, or only one task is defined in the config file, you can omit the task name:
-
-```sh
-dmon start
-dmon stop
-dmon restart
-dmon status
-dmon exec
-```
-
-You can use `-c` / `--config` to specify a custom config file or the directory containing it:
-
-```sh
-dmon start --config /path/to/dmon.yaml app  # YAML
-dmon start --config /path/to/pyproject.toml app  # or TOML
-dmon start -c /path/to/dir app  # shorter, dir with `dmon.y(a)ml` or `pyproject.toml`
-```
-
-The same config discovery and selection rules apply to stacks. A stack name can
-be omitted when `default_stack` is set or only one stack is configured. Options
-belonging to a stack operation go after that operation and may appear before or
-after the stack name; for example, `dmon stack up -d dev` and `dmon stack up dev
--d` are equivalent.
-
-And yes, you can use `dmon` to run in a nested manner:
-
-```yaml
-tasks:
-  app: ["python", "-u", "server.py"]
-  nested: pwd && dmon exec app  # nest `dmon exec`
-  subdir_task1:
-    cwd: /path/to/dir
-    cmd: ["dmon", "exec", "app"]  # run task defined in another folder
-  subdir_task2: dmon exec app --config /path/to/dir/dmon.yaml  # like above
-```
-
+Put dmon options before `--command`; the optional second `--` marks the child
+command. See [readiness configuration](https://github.com/atomiechen/dmon/blob/main/docs/configuration.md#readiness)
+for probe options, listener ownership checks, and wait results.
 
 ### Run an ad-hoc command
 
 ```sh
-# Run a command with arguments in the background
 dmon run --name myserver python -u server.py
-
-# Optionally use -- to make the child-command boundary explicit
 dmon run --name timer -- python -c 'import time; time.sleep(30)'
-
-# Run a shell command in the background
 dmon run --shell echo "Hello World"
-
-# Run a shell script in the background
 dmon run --cwd /path/to/script bash myscript.sh
 ```
 
-> [!NOTE]
-> If no name is provided, `dmon` automatically assigns a fixed task name `default_run` to prevent duplicate runs.
-
+No configuration is needed. Without `--name`, dmon uses the fixed name
+`default_run` to prevent duplicate runs.
 
 ### List recorded tasks and their status
 
 ```sh
 dmon list
-```
-
-Finite inspection and readiness commands also support machine-readable output:
-
-```sh
 dmon status app --format json
 dmon list --format json
 dmon stack status dev --format json
@@ -392,127 +232,25 @@ from dmon import Dmon
 
 client = Dmon(config="dmon.yaml")
 started = client.start("app")
-ready = client.wait("app", timeout=30)
 task = client.status("app")
 stacks = client.list_stacks()
 client.stop("app")
 ```
 
-API calls are synchronous and silent. They return immutable `ActionResult`,
+`client.wait("app", timeout=30)` also checks readiness when `app` has a
+configured `ready` probe. API calls are synchronous and silent. They return immutable `ActionResult`,
 `TaskResult`, `StackResult`, and `WaitResult` data; expected runtime states such
 as missing or exited metadata are results, while invalid configuration raises
 `DmonConfigError`. The initial API intentionally does not start a supervised
 stack or create implicit background threads.
 
+## Documentation
 
-## Example Configuration
+Start with the [documentation index](https://github.com/atomiechen/dmon/blob/main/docs/README.md):
 
-A task can be a **string**, **list**, or **dictionary**.
-
-When rotation is enabled, dmon keeps timestamped archives such as
-`app.log.20260807-142106`. Both task and runner logs use this cross-platform
-format; a same-second collision adds `.1`, `.2`, and so on. Archives are never
-deleted by default. Set a backup count explicitly to enable retention cleanup.
-`log_path` contains task output; `rotate_log_path` contains diagnostics from the
-dmon process that captures and rotates that output. They are independent log
-streams and use independent retention settings.
-The size limit is checked at line boundaries, so a single long line may exceed
-the configured limit.
-
-Here is a more complete example with default values:
-
-```yaml
-tasks:
-  your_task_name:
-    # Command to run; can be a string (run in shell) or list of strings (exec form)
-    cmd: ["python", "server.py"]  # required
-    cwd: "/path/to/working/dir"  # (default: current dir)
-    env_file: [".env", ".env.local"]  # optional; later files override earlier files
-    env:  # (default: inherit from parent process)
-      PYTHONUNBUFFERED: "1"
-    override_env: false  # true omits parent env; use env_file and env only
-    log_path: "logs/<task>.log" # path to log file
-    log_rotate: false  # enable log rotation
-    log_max_size: 5  # max log file size before rotation in MB
-    # log_backup_count: 10  # optional; omit to retain all task log archives
-    rotate_log_path: "logs/<task>.rotate.log"  # path to rotation log
-    rotate_log_max_size: 5  # max rotation log file size in MB
-    # rotate_log_backup_count: 10  # optional; omit to retain all runner log archives
-    meta_path: ".dmon/<task>.meta.json"  # path to meta file
-    depends_on: [another_task]  # dependency order used by `dmon stack up`
-    ready:  # optional; exactly one of http, tcp, or command
-      command: [python, healthcheck.py]
-      timeout: 30  # total seconds to wait (default: 30)
-      interval: 0.2  # seconds between attempts (default: 0.2)
-default_task: your_task_name  # the default task name
-stacks:
-  dev: [your_task_name]
-default_stack: dev
-```
-
-`env_file` accepts one path or an ordered list of dotenv files. Paths are
-relative to the dmon configuration file. Later files override earlier files,
-the existing process environment overrides file values, and the explicit `env`
-table has highest priority. Set `override_env: true` to omit the existing
-process environment. Standard dotenv `${NAME}` expansion can refer to earlier
-values in the same file or any earlier file in the list. Missing files and keys
-without assigned values fail startup without creating task metadata.
-Environment values and environment-file paths are never written to metadata or
-JSON inspection output.
-
-In TOML, write like this:
-
-```toml
-[tool.dmon.tasks]
-your_task_name = { cmd = [
-  "python", "-u", "server.py"
-], ... }
-another_task = "cd subdir && ls && bash start.sh"
-
-[tool.dmon]
-default_task = "your_task_name"
-```
-
-All paths, including `env_file`, can be absolute or relative to the **config
-file location**.
-
-YAML anchors and merge keys can reuse task fragments within one configuration
-file. Task dependencies are resolved transitively and cycles are rejected.
-dmon intentionally does not recursively include or merge other configuration
-files; keeping one path owner makes command, environment, log, and metadata
-paths unambiguous.
-
-
-## Under the Hood
-
-Each task has `.dmon/<task>.meta.json`, which records its command, PID, process
-creation time, and log paths. An active foreground or detached stack also has
-`.dmon/<stack>.stack.json`, which records its mode, supervisor, and the exact
-task processes it owns. Metadata paths are reserved exclusively and subsequent
-updates replace the JSON atomically; a per-run ID isolates stop requests, while
-PID plus creation time prevents a recycled PID from being mistaken for the
-original process. Environment values are used only to launch and probe the task;
-they are never written to metadata. Normal foreground cleanup removes its stack
-metadata.
-
-`dmon stack down` normally asks the foreground or detached supervisor to stop
-tasks in reverse order.
-If the supervisor has crashed, it uses the persisted process identities to
-recover the orphaned stack without inferring ownership from current
-configuration. Existing or unreadable stack metadata is preserved rather than
-overwritten; use `dmon stack down` for stale, readable state. **Do not** edit or
-delete `.dmon` files manually.
-
-The log viewer is deliberately separate from process control. It opens task log
-files only while reading, closes them before waiting for more output, and uses
-file identity to reopen a replacement after rotation. Stopping `dmon stack logs
--f` cannot stop or restart a task or stack. The same read-only component powers
-foreground log attachment; a display failure does not change stack lifecycle.
-
-`dmon status` returns a non-zero status if a recorded task has exited. Starting
-that task again removes its stale metadata automatically. `dmon stop` terminates
-the complete process tree and also cleans stale metadata left by an exited task.
-
+- [Configuration](https://github.com/atomiechen/dmon/blob/main/docs/configuration.md): task selection, YAML/TOML, environments, readiness, and logs.
+- [Task and stack lifecycle](https://github.com/atomiechen/dmon/blob/main/docs/ownership.md): startup, repair, recovery, and process ownership.
+- [Coding-agent setup](https://github.com/atomiechen/dmon/blob/main/docs/agent-setup.md): install the workflow and continue across sessions.
 
 ## Development
 

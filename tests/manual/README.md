@@ -4,6 +4,25 @@ Run this lab after changes to process lifecycle, signals, logs, CLI presentation
 configuration paths, or stack supervision. Automated tests remain mandatory;
 this lab covers terminal behavior and real-process interaction.
 
+## Windows-specific release checks
+
+Automated CI covers Windows on the supported Python versions. Before a release
+that changes process lifecycle, console signals, paths, or detached supervision,
+also validate a clean checkout with native Windows Python:
+
+```powershell
+uv run --no-project --python 3.13 scripts/validate_checkout.py --python 3.13
+uv run --no-project --python 3.8 scripts/validate_checkout.py --python 3.8
+```
+
+Use an actual Windows terminal for Ctrl+C and terminal-close behavior. Reopen a
+new terminal after closing one that launched a detached stack and verify the
+recorded identities are unchanged. Also exercise a path containing spaces or
+non-ASCII characters, an npm wrapper whose Node child must be stopped with the
+task, and log following across rotation; stopping the log viewer must not stop
+the services. Inspect test-owned process identities after failures rather than
+killing by process name or port.
+
 ## Setup and cleanup
 
 From the repository root:

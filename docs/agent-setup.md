@@ -1,5 +1,7 @@
 # Use dmon with a coding agent
 
+[Documentation index](README.md) · [Quick start](../README.md#getting-started)
+
 The CLI runs services. The [skill](../skills/dmon/SKILL.md) teaches an agent
 when to use it and how to inspect, repair, and stop existing services.
 

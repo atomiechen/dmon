@@ -23,7 +23,7 @@ def main():
     args = parser.parse_args()
     uv = shutil.which("uv")
     if not uv:
-        parser.error("uv is required; see docs/windows-validation.md")
+        parser.error("uv is required; see tests/manual/README.md")
 
     def git(*arguments):
         return subprocess.check_output(
@@ -62,7 +62,7 @@ def main():
         "native_windows": sys.platform == "win32",
         "requested_python": args.python,
         "commands": [],
-        "manual_checks": "pending; see docs/windows-validation.md",
+        "manual_checks": "pending; see tests/manual/README.md",
         "cleanup_review": "pending; review test-owned process identities",
         "note": "Unreleased checkout build; package version alone is not its identity",
     }

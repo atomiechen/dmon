@@ -16,9 +16,9 @@ uv build
 For validation across machines, use a clean, pinned Git commit and
 `uv run --no-project --python 3.13 scripts/validate_checkout.py`. This builds and
 tests the installed wheel and collects evidence under ignored `.local/`.
-See [Windows validation](docs/windows-validation.md) for the native console
-checks. Automated CI does not replace those
-interactive checks.
+See the [manual lifecycle lab](tests/manual/README.md) for terminal and
+platform-specific checks. Automated CI does not replace those interactive
+checks.
 
 Use `uv sync` after intentionally changing dependencies or the project version,
 and commit the resulting `uv.lock` change. Use `uv sync --locked --dev` in clean

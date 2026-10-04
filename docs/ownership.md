@@ -1,4 +1,135 @@
-# Local service ownership
+# Task and stack lifecycle
+
+[Documentation index](README.md) · [Configuration](configuration.md)
+
+A task name selects its current recorded instance. A stack owns the exact
+instances launched by that stack run, including replacements made by its live
+supervisor. This distinction matters when recovering one service while healthy
+services keep running.
+
+## Standalone tasks
+
+`dmon start` and `dmon run` launch managed background tasks. `dmon exec` runs
+one configured command directly in the current terminal for debugging; it is
+not registered as a managed background task. Use `start` when later terminals
+or sessions need to inspect the task through `status` and `list`.
+
+Multi-task `start` is best-effort: dmon attempts every requested task and leaves
+successful tasks running if another task cannot start. It returns nonzero and
+prints a summary naming the failed tasks. It does not provide stack rollback or
+automatically start dependencies. `start` alone does not wait for readiness;
+use `dmon wait` afterward when readiness is needed.
+
+## Stack startup and runtime
+
+A foreground stack is a managed multi-task lifecycle and remains discoverable
+from another terminal:
+
+```sh
+dmon stack up dev
+# Omit the name when default_stack (or only one stack) is configured
+dmon stack up
+
+# Keep the supervised stack running in the background
+dmon stack up -d dev
+dmon stack status dev
+dmon stack list
+dmon stack down dev
+
+# Optional fail-fast policy for foreground or detached stacks
+dmon stack up --abort-on-exit dev
+```
+
+`dmon stack up` starts dependencies in order and waits for each task's optional
+readiness probe. A startup failure or readiness timeout rolls back every task
+started by that invocation, in reverse dependency order; it does not adopt or
+clean unrelated existing tasks.
+
+After startup, an exited task marks the stack as degraded while unrelated
+tasks continue running, matching Docker Compose's default behavior. Use
+`--abort-on-exit` when the whole stack should stop after any runtime exit.
+Ctrl-C or SIGTERM cleans up a foreground stack in reverse order. `dmon stack
+down` requests the same cleanup for an active foreground or detached stack
+from another terminal.
+
+To replace an exited member while preserving stack membership, use
+[stack repair](#repair-an-exited-stack-member). Starting it separately with
+`dmon start worker` creates a standalone replacement; it does not repair the
+original stack, and `stack down` will not stop that replacement. See
+[standalone recovery](#recover-one-failed-member-without-restarting-healthy-services)
+when an independent replacement is intentional.
+
+## Detached stacks and failed startup
+
+Detached mode waits for the same startup and readiness checks before returning.
+A lightweight background supervisor keeps monitoring the stack; `dmon stack
+down` requests the same graceful reverse-order cleanup on every platform.
+Supervisor diagnostics are written to `logs/<stack>.stack.log`. Status includes
+every owned task and its process tree; `stack list` summarizes all recorded
+foreground and detached stacks.
+
+`dmon stack restart dev` applies to detached stacks: it performs a clean `down`
+followed by a detached `up` and preserves the stack's exit policy. It stops
+healthy members too. Cross-terminal restart of a foreground stack is rejected
+rather than converting it to detached mode.
+
+A detached startup failure preserves the failing task and cause in both startup
+output and subsequent JSON status. The stack's `log_path` points to supervisor
+diagnostics; `stack logs` only shows task output and may be empty when no task
+launched. Correct the cause, then use `stack down` to clear the failed run
+before starting again. Environment-file details stay in the diagnostic log
+rather than persisted status.
+
+If the supervisor is killed, its persisted ownership metadata lets `down`
+recover and clean the tasks it started. Read
+[supervisor-crash recovery](#recover-a-stack-after-a-supervisor-crash) and
+[ownership limits](#what-is-and-is-not-guaranteed) before acting on orphaned runs.
+
+## Logs and foreground output
+
+```sh
+dmon stack logs --tail 100 dev
+dmon stack logs -f dev
+```
+
+Foreground `stack up` displays new task output with task-name prefixes, while
+retaining it in each task's configured `log_path`. Detached mode does not attach
+output. `stack logs` reads the latest 100 lines per task by default; `--tail`
+changes that count and `-f` follows new output. Viewing logs never modifies the
+underlying files or controls running processes.
+
+The log viewer opens files only while reading and closes them before waiting
+for more output. File identity lets it reopen a replacement after rotation.
+Stopping `stack logs -f` cannot stop or restart a task or stack. The same
+read-only component powers foreground attachment; a display failure does not
+change stack lifecycle. See [logging configuration](configuration.md#task-fields-environments-and-logging)
+for rotation and retention.
+
+## Metadata and process identity
+
+dmon grew out of the [handy-backend shell scripts](https://github.com/atomiechen/handy-backend).
+
+Each task has `.dmon/<task>.meta.json`, which records its command, PID, process
+creation time, and log paths. An active foreground or detached stack also has
+`.dmon/<stack>.stack.json`, which records its mode, supervisor, and the exact
+task processes it owns. Metadata paths are reserved exclusively and subsequent
+updates replace the JSON atomically; a per-run ID isolates stop requests, while
+PID plus creation time prevents a recycled PID from being mistaken for the
+original process. Environment values are used only to launch and probe the task;
+they are never written to metadata. Normal foreground cleanup removes its stack
+metadata.
+
+`dmon stack down` normally asks the foreground or detached supervisor to stop
+tasks in reverse order.
+If the supervisor has crashed, it uses the persisted process identities to
+recover the orphaned stack without inferring ownership from current
+configuration. Existing or unreadable stack metadata is preserved rather than
+overwritten; use `dmon stack down` for stale, readable state. **Do not** edit or
+delete `.dmon` files manually.
+
+`dmon status` returns a non-zero status if a recorded task has exited. Starting
+that task again removes its stale metadata automatically. `dmon stop` terminates
+the complete process tree and also cleans stale metadata left by an exited task.
 
 ## Verify the service you started
 
@@ -228,5 +359,14 @@ Changing valid configuration does not change the identities owned by an existing
 stack: stopping it uses its saved ownership. Status describes the saved run, not
 proof that it matches the edited configuration. There is no config-drift
 reconciler or automatic restart. If configuration becomes invalid or its stack is
-removed, restore the last valid configuration before using the normal named CLI
-workflow to stop the run. Keep config changes separate from active-run recovery.
+removed, name the saved run and supply the original project directory explicitly:
+
+```sh
+dmon stack status dev -c /absolute/project/directory --format json
+# When stopping that saved run is intended:
+dmon stack down dev -c /absolute/project/directory
+```
+
+Named `status`, `down`, and `repair` can locate saved stack metadata this way
+without parsing the edited configuration. `up`, `restart`, and `logs` still need
+valid configuration. Keep config changes separate from active-run recovery.
